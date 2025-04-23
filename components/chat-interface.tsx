@@ -1,0 +1,226 @@
+"use client"
+
+import type React from "react"
+
+import { useState, useEffect, useRef } from "react"
+import { MessageBubble } from "./message-bubble"
+import { MicButton } from "./mic-button"
+import { TypingIndicator } from "./typing-indicator"
+import { Send, Loader2 } from "lucide-react"
+
+interface Message {
+  id: string
+  sender: "user" | "agent"
+  text: string
+  timestamp: Date
+  audioUrl?: string
+}
+
+interface ChatInterfaceProps {
+  initialMessages?: Message[]
+  conversationId?: string
+}
+
+export function ChatInterface({ initialMessages = [], conversationId }: ChatInterfaceProps) {
+  const [messages, setMessages] = useState<Message[]>(initialMessages)
+  const [inputText, setInputText] = useState("")
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false)
+  const [currentConversationId, setCurrentConversationId] = useState(conversationId)
+  const [isTyping, setIsTyping] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messages, isTyping])
+
+  // Handle text input submission
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (!inputText.trim() || isProcessing) return
+
+    // Add user message
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      sender: "user",
+      text: inputText,
+      timestamp: new Date(),
+    }
+
+    setMessages((prev) => [...prev, userMessage])
+    setInputText("")
+    setIsProcessing(true)
+    setIsTyping(true)
+
+    try {
+      // Create a new AbortController for this request
+      abortControllerRef.current = new AbortController()
+
+      // Send message to API
+      const response = await fetch("/api/llm/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: [
+            ...messages.map((m) => ({
+              role: m.sender === "user" ? "user" : "assistant",
+              content: m.text,
+            })),
+            { role: "user", content: inputText },
+          ],
+          conversationId: currentConversationId,
+          stream: false,
+        }),
+        signal: abortControllerRef.current.signal,
+      })
+
+      const data = await response.json()
+
+      if (data.error) {
+        throw new Error(data.error)
+      }
+
+      // Update conversation ID if it's a new conversation
+      if (data.conversationId && !currentConversationId) {
+        setCurrentConversationId(data.conversationId)
+      }
+
+      setIsTyping(false)
+
+      // Add agent message
+      const agentMessage: Message = {
+        id: Date.now().toString(),
+        sender: "agent",
+        text: data.text,
+        timestamp: new Date(),
+      }
+
+      setMessages((prev) => [...prev, agentMessage])
+
+      // Generate audio for the agent message
+      setIsGeneratingAudio(true)
+
+      const audioResponse = await fetch("/api/tts/elevenlabs", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: data.text,
+          conversationId: currentConversationId,
+          messageId: agentMessage.id,
+        }),
+      })
+
+      const audioData = await audioResponse.json()
+
+      if (audioData.error) {
+        console.error("Error generating audio:", audioData.error)
+      } else {
+        // Update the agent message with the audio URL
+        setMessages((prev) => prev.map((m) => (m.id === agentMessage.id ? { ...m, audioUrl: audioData.audioUrl } : m)))
+      }
+    } catch (error) {
+      console.error("Error processing message:", error)
+
+      // If it's not an abort error, add an error message
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            sender: "agent",
+            text: "I'm sorry, I encountered an error processing your request. Please try again.",
+            timestamp: new Date(),
+          },
+        ])
+      }
+    } finally {
+      setIsProcessing(false)
+      setIsGeneratingAudio(false)
+      abortControllerRef.current = null
+    }
+  }
+
+  // Handle voice input
+  const handleVoiceInput = (transcript: string) => {
+    if (!transcript.trim()) return
+
+    setInputText(transcript)
+
+    // Auto-submit after a short delay
+    setTimeout(() => {
+      handleSubmit({ preventDefault: () => {} } as React.FormEvent)
+    }, 500)
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Messages container */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {messages.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <p className="text-gray-400">Start a conversation by speaking or typing a message.</p>
+          </div>
+        ) : (
+          <div>
+            {messages.map((message, index) => (
+              <MessageBubble key={message.id} message={message} isLatest={index === messages.length - 1} />
+            ))}
+            {isTyping && <TypingIndicator />}
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input area */}
+      <div className="border-t border-gray-800 p-4">
+        <form onSubmit={handleSubmit} className="flex items-end gap-2">
+          <div className="flex-1 relative">
+            <textarea
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="Type a message..."
+              className="w-full rounded-lg bg-gray-800 border border-gray-700 p-3 pr-10 resize-none focus:outline-none focus:ring-2 focus:ring-primary"
+              rows={1}
+              disabled={isProcessing}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  handleSubmit(e)
+                }
+              }}
+            />
+            {isProcessing && (
+              <div className="absolute right-3 bottom-3">
+                <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+              </div>
+            )}
+          </div>
+
+          <MicButton onTranscript={handleVoiceInput} isDisabled={isProcessing} size="md" />
+
+          <button
+            type="submit"
+            disabled={!inputText.trim() || isProcessing}
+            className="h-14 w-14 rounded-full bg-primary flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-opacity-90"
+          >
+            <Send className="h-6 w-6 text-white" />
+          </button>
+        </form>
+
+        {isGeneratingAudio && (
+          <div className="mt-2 text-xs text-gray-400 flex items-center">
+            <Loader2 className="h-3 w-3 animate-spin mr-1" />
+            Generating voice response...
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

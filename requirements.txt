@@ -1,0 +1,4 @@
+# Python dependencies for JARVIS automation
+pyautogui==0.9.54
+webbrowser==0.10.5
+python-dotenv==1.0.0
