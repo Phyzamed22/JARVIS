@@ -211,12 +211,12 @@ export function ChatInterface({ initialMessages = [], conversationId }: ChatInte
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full chat-container">
       {/* Messages container */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-2 md:p-4 message-list">
         {messages.length === 0 ? (
           <div className="flex items-center justify-center h-full">
-            <p className="text-gray-400">Start a conversation by speaking or typing a message.</p>
+            <p className="text-gray-400 text-sm md:text-base px-4 text-center">Start a conversation by speaking or typing a message.</p>
           </div>
         ) : (
           <div>
@@ -230,14 +230,14 @@ export function ChatInterface({ initialMessages = [], conversationId }: ChatInte
       </div>
 
       {/* Input area */}
-      <div className="border-t border-gray-800 p-4">
-        <form onSubmit={handleSubmit} className="flex items-end gap-2">
+      <div className="border-t border-gray-800 p-2 md:p-4 chat-input-container">
+        <form onSubmit={handleSubmit} className="flex items-end gap-2 chat-input-wrapper">
           <div className="flex-1 relative">
             <textarea
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               placeholder="Type a message..."
-              className="w-full rounded-lg bg-gray-800 border border-gray-700 p-3 pr-10 resize-none focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full rounded-lg bg-gray-800 border border-gray-700 p-2 md:p-3 pr-10 resize-none focus:outline-none focus:ring-2 focus:ring-primary text-sm md:text-base"
               rows={1}
               disabled={isProcessing}
               onKeyDown={(e) => {
@@ -249,20 +249,22 @@ export function ChatInterface({ initialMessages = [], conversationId }: ChatInte
             />
             {isProcessing && (
               <div className="absolute right-3 bottom-3">
-                <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                <Loader2 className="h-4 w-4 md:h-5 md:w-5 animate-spin text-gray-400" />
               </div>
             )}
           </div>
 
-          <MicButton onTranscript={handleVoiceInput} isDisabled={isProcessing} size="md" />
+          <div className="flex gap-2 controls-container">
+            <MicButton onTranscript={handleVoiceInput} isDisabled={isProcessing} size="md" />
 
-          <button
-            type="submit"
-            disabled={!inputText.trim() || isProcessing}
-            className="h-14 w-14 rounded-full bg-primary flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-opacity-90"
-          >
-            <Send className="h-6 w-6 text-white" />
-          </button>
+            <button
+              type="submit"
+              disabled={!inputText.trim() || isProcessing}
+              className="h-12 w-12 md:h-14 md:w-14 rounded-full bg-primary flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-opacity-90 send-button"
+            >
+              <Send className="h-5 w-5 md:h-6 md:w-6 text-white" />
+            </button>
+          </div>
         </form>
 
         {isGeneratingAudio && (

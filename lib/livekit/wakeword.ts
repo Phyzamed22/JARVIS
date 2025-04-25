@@ -95,29 +95,44 @@ export class WakeWordDetection {
   }
 
   /**
-   * Set up speech recognition for wake word detection
+   * Set up speech recognition for wake word detection with reduced latency
    */
   private setupSpeechRecognition(): void {
-    // Use the VAD to detect when someone is speaking
+    // Use the VAD to detect when someone is speaking with improved sensitivity
     this.vad.onSpeakingStart((participant) => {
       // Only process if it's not the local participant (assistant)
       if (participant !== this.livekitClient.getLocalParticipant()) {
         // In a real implementation, we would use a more sophisticated wake word detection
-        // For now, we'll simulate it by checking if the participant is speaking
-        // and assume they might be saying the wake word
+        // For now, we'll optimize our simulation for faster response
         
         // In a production system, you would:
         // 1. Capture the audio
         // 2. Run it through a wake word detection model (like Porcupine)
         // 3. Only trigger if the wake word is detected with high confidence
         
-        // For this implementation, we'll just trigger the wake word callback
-        // This would be replaced with actual wake word detection logic
+        // For this implementation, we'll use a faster response time
+        // and rely on the improved VAD detection from our other optimizations
         setTimeout(() => {
           if (this.isListening) {
             this.triggerWakeWord();
           }
-        }, 1000); // Simulate processing time
+        }, 300); // Reduced processing time for faster response
+      }
+    });
+    
+    // Add volume-based detection for better sensitivity
+    this.vad.onVolumeChanged((participant, volume) => {
+      // Only process if it's not the local participant and volume is significant
+      if (participant !== this.livekitClient.getLocalParticipant() && 
+          volume > this.confidenceThreshold * 0.8 && // Lower threshold for volume detection
+          this.isListening) {
+        // This provides an alternative path for wake word detection
+        // that may catch quieter speech the VAD might miss
+        setTimeout(() => {
+          if (this.isListening) {
+            this.triggerWakeWord();
+          }
+        }, 400);
       }
     });
   }

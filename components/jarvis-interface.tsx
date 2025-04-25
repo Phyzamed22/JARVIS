@@ -76,6 +76,8 @@ export function JarvisInterface() {
     isLoading: false,
     error: undefined
   })
+  // Track if we're on a mobile device
+  const isMobile = typeof window !== "undefined" ? window.innerWidth < 768 : false
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)

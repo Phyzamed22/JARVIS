@@ -64,18 +64,18 @@ export function MicButton({ onTranscript, isDisabled = false, size = "md" }: Mic
     }
   }
 
-  // Determine button size
+  // Determine button size with responsive adjustments
   const buttonSize = {
-    sm: "h-10 w-10",
-    md: "h-14 w-14",
-    lg: "h-16 w-16",
+    sm: "h-8 w-8 sm:h-9 sm:w-9 md:h-10 md:w-10",
+    md: "h-12 w-12 sm:h-13 sm:w-13 md:h-14 md:w-14",
+    lg: "h-14 w-14 sm:h-15 sm:w-15 md:h-16 md:w-16",
   }[size]
 
-  // Determine icon size
+  // Determine icon size with responsive adjustments
   const iconSize = {
-    sm: "h-5 w-5",
-    md: "h-6 w-6",
-    lg: "h-7 w-7",
+    sm: "h-4 w-4 sm:h-4.5 sm:w-4.5 md:h-5 md:w-5",
+    md: "h-5 w-5 sm:h-5.5 sm:w-5.5 md:h-6 md:w-6",
+    lg: "h-6 w-6 sm:h-6.5 sm:w-6.5 md:h-7 md:w-7",
   }[size]
 
   if (isInitializing) {

@@ -196,12 +196,16 @@ export function VoiceProviderLiveKit({
         micStreamRef.current.getTracks().forEach((track) => track.stop())
       }
       
-      // Get microphone access
+      // Get microphone access with optimized settings
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
+          // Add latency hint to reduce processing delay
+          latency: 0.01,
+          sampleRate: 44100, // Higher sample rate for better quality
+          channelCount: 1, // Mono is sufficient and more efficient
         },
       })
       micStreamRef.current = stream
@@ -210,20 +214,26 @@ export function VoiceProviderLiveKit({
       try {
         // Check if AudioContext exists and is not closed
         if (!audioContextRef.current || audioContextRef.current.state === "closed") {
-          audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
+          // Create audio context with lower latency settings
+          const contextOptions = {
+            latencyHint: 'interactive',
+            sampleRate: 44100
+          }
+          audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)(contextOptions)
         } else if (audioContextRef.current.state === "suspended") {
           await audioContextRef.current.resume()
         }
         
         const analyser = audioContextRef.current.createAnalyser()
         analyserRef.current = analyser
-        analyser.fftSize = 1024
-        analyser.smoothingTimeConstant = 0.5
+        // Reduce FFT size for faster processing
+        analyser.fftSize = 512 // Smaller buffer size reduces latency
+        analyser.smoothingTimeConstant = 0.3 // Less smoothing for faster response
         
         const source = audioContextRef.current.createMediaStreamSource(stream)
         source.connect(analyser)
         
-        // Start monitoring volume
+        // Start monitoring volume with optimized buffer
         const dataArray = new Uint8Array(analyser.frequencyBinCount)
         
         const updateVolume = () => {
@@ -231,12 +241,15 @@ export function VoiceProviderLiveKit({
           
           analyserRef.current.getByteFrequencyData(dataArray)
           
-          // Calculate RMS volume
+          // Calculate RMS volume with optimization
           let sum = 0
-          for (let i = 0; i < dataArray.length; i++) {
+          // Process only a subset of the data for efficiency
+          const stride = 2 // Skip every other sample
+          for (let i = 0; i < dataArray.length; i += stride) {
             sum += dataArray[i] * dataArray[i]
           }
-          const rms = Math.sqrt(sum / dataArray.length)
+          const samplesProcessed = Math.ceil(dataArray.length / stride)
+          const rms = Math.sqrt(sum / samplesProcessed)
           const normalizedVolume = rms / 128 // Normalize to 0-1
           
           setCurrentVolume(normalizedVolume)
@@ -259,9 +272,19 @@ export function VoiceProviderLiveKit({
         updateVolume()
       } catch (error) {
         console.error("Error setting up audio context:", error)
+        toast({
+          title: "Audio Processing Error",
+          description: "There was an error setting up audio processing. Please refresh the page.",
+          variant: "destructive",
+        })
       }
     } catch (error) {
       console.error("Error setting up audio monitoring:", error)
+      toast({
+        title: "Microphone Access Error",
+        description: "Could not access your microphone. Please check permissions and try again.",
+        variant: "destructive",
+      })
     }
   }
   

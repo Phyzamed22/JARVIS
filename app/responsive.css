@@ -1,0 +1,151 @@
+/* Mobile Responsive Styles for JARVIS 2.0 */
+
+/* Base responsive breakpoints */
+:root {
+  --mobile-breakpoint: 768px;
+  --small-mobile-breakpoint: 480px;
+}
+
+/* Global responsive adjustments */
+@media (max-width: 768px) {
+  html {
+    font-size: 14px; /* Slightly smaller base font size on mobile */
+  }
+  
+  /* Improve touch targets for better mobile usability */
+  button, 
+  .mic-button,
+  [role="button"],
+  input,
+  a {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Adjust padding for mobile screens */
+  .container {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}
+
+/* Chat interface mobile optimizations */
+@media (max-width: 768px) {
+  /* Optimize chat container for mobile */
+  .chat-container {
+    height: calc(100vh - 120px);
+    padding: 0.5rem;
+  }
+  
+  /* Adjust message bubbles for mobile */
+  .message-bubble {
+    max-width: 90%;
+  }
+  
+  /* Make input area more mobile-friendly */
+  .chat-input-container {
+    padding: 0.5rem;
+  }
+  
+  /* Optimize the input field and buttons */
+  .chat-input-wrapper {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  
+  /* Ensure the send button is easily tappable */
+  .send-button {
+    width: 44px;
+    height: 44px;
+  }
+  
+  /* Adjust mic button for better mobile experience */
+  .mic-button {
+    width: 50px;
+    height: 50px;
+  }
+  
+  /* Optimize status badge for mobile */
+  .status-badge {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+  }
+}
+
+/* JARVIS Interface specific mobile optimizations */
+@media (max-width: 768px) {
+  /* Adjust the main interface container */
+  .jarvis-container {
+    padding: 0.5rem;
+    gap: 0.5rem;
+  }
+  
+  /* Optimize the voice waveform visualization */
+  .sound-wave {
+    height: 24px;
+  }
+  
+  .sound-wave .bar {
+    width: 2px;
+  }
+  
+  /* Make LiveKit status indicator more compact */
+  .livekit-status {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+  }
+  
+  /* Adjust avatar size for mobile */
+  .avatar {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+/* Small mobile devices (under 480px) */
+@media (max-width: 480px) {
+  /* Further optimize for very small screens */
+  .message-bubble {
+    max-width: 95%;
+  }
+  
+  /* Stack controls vertically on very small screens */
+  .controls-container {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  
+  /* Adjust font sizes for very small screens */
+  h1 {
+    font-size: 1.5rem;
+  }
+  
+  h2 {
+    font-size: 1.25rem;
+  }
+  
+  /* Ensure buttons are still easily tappable */
+  .button-group {
+    gap: 0.25rem;
+  }
+}
+
+/* Landscape orientation adjustments */
+@media (max-width: 768px) and (orientation: landscape) {
+  .chat-container {
+    height: calc(100vh - 100px);
+  }
+  
+  /* Optimize vertical space usage in landscape */
+  .message-list {
+    max-height: calc(100vh - 150px);
+  }
+}
+
+/* Fix for iOS Safari viewport height issues */
+@supports (-webkit-touch-callout: none) {
+  .chat-container,
+  .jarvis-container {
+    height: -webkit-fill-available;
+  }
+}

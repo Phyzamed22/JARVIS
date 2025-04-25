@@ -42,7 +42,7 @@ class LiveKitClient {
   }
 
   /**
-   * Connect to a LiveKit room
+   * Connect to a LiveKit room with optimized connection handling
    * @param token JWT token for authentication
    * @param roomName Name of the room to join
    * @param options Connection options
@@ -50,32 +50,77 @@ class LiveKitClient {
   public async connect(token: string, roomName: string, options: {
     audio?: boolean;
     video?: boolean;
-  } = { audio: true, video: false }): Promise<boolean> {
+    maxRetries?: number;
+  } = { audio: true, video: false, maxRetries: 3 }): Promise<boolean> {
     try {
       this.token = token;
       this.roomName = roomName;
+      const maxRetries = options.maxRetries || 3;
+      let retryCount = 0;
+      let connected = false;
 
-      // Create a new room instance
+      // Create a new room instance with optimized settings
       this.room = new Room({
         adaptiveStream: true,
         dynacast: true,
-        // Use audio settings compatible with the Room options type
+        // Add optimized audio settings
+        audioCaptureDefaults: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        // Reduce connection timeout for faster error detection
+        connectionTimeout: 10000, // 10 seconds instead of default 15s
       });
 
       // Set up event listeners
       this.setupRoomEventListeners();
 
-      // Connect to the room
-      await this.room.connect(this.serverUrl, token, {
-        autoSubscribe: true,
-      });
+      // Connection retry loop
+      while (!connected && retryCount <= maxRetries) {
+        try {
+          if (retryCount > 0) {
+            console.log(`Retrying LiveKit connection (attempt ${retryCount} of ${maxRetries})...`);
+            // Short delay before retry
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+
+          // Connect to the room with optimized settings
+          await this.room.connect(this.serverUrl, token, {
+            autoSubscribe: true,
+            rtcConfig: {
+              // Use Google's public STUN servers for faster ICE negotiation
+              iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+              ],
+              // Reduce ICE candidate gathering time
+              iceCandidatePoolSize: 10,
+            }
+          });
+
+          connected = true;
+        } catch (err) {
+          retryCount++;
+          if (retryCount > maxRetries) {
+            throw err; // Rethrow if we've exhausted retries
+          }
+        }
+      }
 
       this.localParticipant = this.room.localParticipant;
       this.isConnected = true;
 
-      // Enable microphone if requested
+      // Enable microphone if requested - with faster timeout
       if (options.audio) {
-        await this.enableMicrophone();
+        const micEnabled = await Promise.race([
+          this.enableMicrophone(),
+          new Promise<boolean>(resolve => setTimeout(() => resolve(false), 3000))
+        ]);
+        
+        if (!micEnabled) {
+          console.warn('Microphone enabling timed out, but continuing with connection');
+        }
       }
 
       // Notify connected callbacks

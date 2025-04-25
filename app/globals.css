@@ -2,6 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Import responsive styles */
+@import './responsive.css';
+
 :root {
   --background: 224 71% 4%;
   --foreground: 213 31% 91%;

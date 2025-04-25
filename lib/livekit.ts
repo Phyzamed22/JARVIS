@@ -1,7 +1,6 @@
 "use client"
 
 import { Room, RoomEvent, LocalParticipant, RemoteParticipant, Track, AudioTrack, ConnectionState } from 'livekit-client'
-import { AccessToken } from 'livekit-server-sdk'
 import { getVoiceSettings } from './voice-settings-service'
 
 // LiveKit client instance
@@ -101,47 +100,25 @@ export async function initializeLiveKit(userId: string): Promise<boolean> {
   }
 }
 
-// Create a LiveKit token for cloud-hosted server
+// Create a LiveKit token by calling the server-side API endpoint
 async function createToken(roomName: string, userId: string): Promise<string | null> {
   try {
-    const settings = getVoiceSettings()
+    console.log('Requesting LiveKit token from server API')
     
-    // Get API key and secret from settings or environment variables
-    const apiKey = settings.livekitApiKey || process.env.NEXT_PUBLIC_LIVEKIT_API_KEY || ''
-    const apiSecret = settings.livekitApiSecret || process.env.NEXT_PUBLIC_LIVEKIT_API_SECRET || ''
+    // Call the server-side API endpoint to generate the token
+    const response = await fetch(`/api/livekit/token?room=${encodeURIComponent(roomName)}&userId=${encodeURIComponent(userId)}`)
     
-    if (!apiKey || !apiSecret) {
-      console.error('Missing LiveKit API key or secret')
+    if (!response.ok) {
+      const errorData = await response.json()
+      console.error('Server returned error:', errorData)
       return null
     }
     
-    console.log('Creating LiveKit token for cloud server')
-    
-    // Create a new AccessToken with TTL (time-to-live) of 24 hours
-    const token = new AccessToken(
-      apiKey,
-      apiSecret,
-      {
-        identity: userId,
-        name: `JARVIS User ${userId}`,
-        ttl: 60 * 60 * 24, // 24 hours in seconds
-      }
-    )
-    
-    // Grant permissions to the room
-    token.addGrant({
-      roomJoin: true,
-      room: roomName,
-      canPublish: true, // Can publish audio/video
-      canSubscribe: true, // Can subscribe to other participants
-      canPublishData: true, // Can publish data
-    })
-    
-    const jwt = token.toJwt()
-    console.log('LiveKit token created successfully')
-    return jwt
+    const data = await response.json()
+    console.log('LiveKit token received successfully from server')
+    return data.token
   } catch (error) {
-    console.error('Error creating LiveKit token:', error)
+    console.error('Error fetching LiveKit token from server:', error)
     return null
   }
 }

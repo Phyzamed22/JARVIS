@@ -7,26 +7,35 @@ import { getLiveKitClient } from './client';
  * and interruption handling with LiveKit
  */
 export class VoiceActivityDetection {
-  private speakingThreshold: number = 0.1; // Volume threshold for speaking detection
-  private silenceTimeout: number = 1000; // Time in ms to consider silence after speaking stops
+  private speakingThreshold: number = 0.08; // Reduced threshold for better sensitivity
+  private silenceTimeout: number = 800; // Reduced time to detect silence faster
   private silenceTimer: NodeJS.Timeout | null = null;
   private isSpeaking: boolean = false;
+  private consecutiveVolumeReadings: number = 0; // Track consecutive readings above threshold
+  private minConsecutiveReadings: number = 2; // Minimum consecutive readings to trigger speaking
   private onSpeakingStartCallbacks: ((participant: RemoteParticipant | LocalParticipant) => void)[] = [];
   private onSpeakingStopCallbacks: ((participant: RemoteParticipant | LocalParticipant) => void)[] = [];
   private onSilenceCallbacks: (() => void)[] = [];
   private onInterruptionCallbacks: ((participant: RemoteParticipant) => void)[] = [];
   private livekitClient = getLiveKitClient();
   private assistantIsSpeaking: boolean = false;
+  private noiseFloor: number = 0.03; // Baseline noise level to adapt to environment
+  private adaptiveThreshold: number = 0.08; // Starting threshold that will adapt
 
   constructor(options?: {
     speakingThreshold?: number;
     silenceTimeout?: number;
+    minConsecutiveReadings?: number;
   }) {
     if (options?.speakingThreshold) {
       this.speakingThreshold = options.speakingThreshold;
+      this.adaptiveThreshold = options.speakingThreshold;
     }
     if (options?.silenceTimeout) {
       this.silenceTimeout = options.silenceTimeout;
+    }
+    if (options?.minConsecutiveReadings) {
+      this.minConsecutiveReadings = options.minConsecutiveReadings;
     }
 
     // Set up LiveKit event listeners
@@ -136,6 +145,49 @@ export class VoiceActivityDetection {
    */
   public onSpeakingStop(callback: (participant: RemoteParticipant | LocalParticipant) => void): void {
     this.onSpeakingStopCallbacks.push(callback);
+  }
+  
+  /**
+   * Process audio data to detect speech with adaptive thresholds
+   * @param audioData Float32Array of audio samples
+   * @returns True if speech is detected
+   */
+  public processAudioData(audioData: Float32Array): boolean {
+    // Calculate RMS volume with optimized processing
+    let sum = 0;
+    const stride = 2; // Process every other sample for efficiency
+    for (let i = 0; i < audioData.length; i += stride) {
+      sum += audioData[i] * audioData[i];
+    }
+    const samplesProcessed = Math.ceil(audioData.length / stride);
+    const rms = Math.sqrt(sum / samplesProcessed);
+    
+    // Update noise floor with slow adaptation (low-pass filter)
+    if (rms < this.adaptiveThreshold && rms > 0.01) {
+      // Only update noise floor if current level is above minimum detectable level
+      // but below our current threshold (likely background noise)
+      this.noiseFloor = this.noiseFloor * 0.95 + rms * 0.05;
+      
+      // Dynamically adjust threshold based on noise floor
+      this.adaptiveThreshold = Math.max(this.speakingThreshold, this.noiseFloor * 2.5);
+    }
+    
+    // Check if volume is above adaptive threshold with consecutive readings
+    if (rms > this.adaptiveThreshold) {
+      this.consecutiveVolumeReadings++;
+      
+      // Only trigger speaking after multiple consecutive readings above threshold
+      // This helps filter out brief noises
+      if (this.consecutiveVolumeReadings >= this.minConsecutiveReadings) {
+        this.handleSpeakingStart(this.livekitClient.getLocalParticipant());
+        return true;
+      }
+    } else {
+      // Reset consecutive readings counter if volume drops below threshold
+      this.consecutiveVolumeReadings = 0;
+    }
+    
+    return false;
   }
 
   /**
