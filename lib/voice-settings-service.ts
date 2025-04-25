@@ -29,39 +29,57 @@ export interface VoiceSettings {
     echo: boolean
     reverb: boolean
   }
+  
+  // LiveKit integration settings
+  livekitEnabled: boolean
+  livekitServerUrl: string
+  livekitApiKey: string
+  livekitApiSecret: string
+  livekitRoomPrefix: string
+  livekitVadSensitivity: number // Voice activity detection sensitivity (0.0 to 1.0)
+  livekitInterruptionEnabled: boolean // Allow interrupting assistant while speaking
 }
 
 // Default voice settings
 export const defaultVoiceSettings: VoiceSettings = {
-  // Recognition defaults
+  // Recognition settings
   recognitionEnabled: true,
   recognitionLanguage: "en-US",
   continuousListening: false,
   autoStopAfterSilence: true,
-  silenceThreshold: 3, // 3 seconds
-  wakeWord: "jarvis",
-  wakeWordEnabled: false,
-  wakeWordSensitivity: "medium",
-  wakeWordAutoStart: false,
-  wakeWordStartConversation: true,
+  silenceThreshold: 2, // seconds
+  wakeWord: "hey jarvis",
+  wakeWordEnabled: true,
+  wakeWordSensitivity: "medium", // Sensitivity for wake word detection
+  wakeWordAutoStart: true, // Automatically start wake word detection on page load
+  wakeWordStartConversation: true, // Start conversational mode after wake word
 
-  // Conversational mode defaults
-  conversationalMode: false,
-  conversationTimeout: 30, // 30 seconds
+  // Conversational mode settings
+  conversationalMode: true,
+  conversationTimeout: 30, // seconds
   conversationContext: true,
 
-  // Synthesis defaults
+  // Synthesis settings
   synthesisEnabled: true,
-  synthesisVoice: "default",
+  synthesisVoice: "Google UK English Male",
   synthesisRate: 1.0,
   synthesisPitch: 1.0,
   synthesisVolume: 1.0,
   autoReadResponses: true,
-  useSSML: false,
+  useSSML: true,
   audioEffects: {
     echo: false,
     reverb: false,
   },
+  
+  // LiveKit integration settings
+  livekitEnabled: true, // Enable LiveKit by default if environment variables are available
+  livekitServerUrl: process.env.NEXT_PUBLIC_LIVEKIT_URL || "",
+  livekitApiKey: process.env.NEXT_PUBLIC_LIVEKIT_API_KEY || "",
+  livekitApiSecret: process.env.NEXT_PUBLIC_LIVEKIT_API_SECRET || "",
+  livekitRoomPrefix: "jarvis",
+  livekitVadSensitivity: 0.7, // Voice activity detection sensitivity (0.0 to 1.0)
+  livekitInterruptionEnabled: true, // Allow interrupting assistant while speaking
 }
 
 // Available recognition languages

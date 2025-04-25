@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
+import { VoiceProviderLiveKit } from "@/components/voice-provider-livekit"
+import { getVoiceSettings } from "@/lib/voice-settings-service"
 
 // Define turn states
 const TURN_STATE = {
@@ -41,6 +43,7 @@ export function JarvisAgent() {
   const [audioVolume, setAudioVolume] = useState(0)
   const [isProcessing, setIsProcessing] = useState(false)
   const [wasInterrupted, setWasInterrupted] = useState(false)
+  const [useLiveKit, setUseLiveKit] = useState(false)
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -61,6 +64,21 @@ export function JarvisAgent() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
+  
+  // Initialize LiveKit based on voice settings
+  useEffect(() => {
+    const settings = getVoiceSettings()
+    setUseLiveKit(settings.livekitEnabled)
+    
+    // Check if LiveKit environment variables are set
+    if (settings.livekitEnabled && (!settings.livekitServerUrl || !settings.livekitApiKey || !settings.livekitApiSecret)) {
+      toast({
+        title: "LiveKit Configuration Missing",
+        description: "Please check your environment variables for LiveKit integration.",
+        variant: "destructive",
+      })
+    }
+  }, [])
 
   // Update the useEffect for speech recognition to better handle transitions
   useEffect(() => {
@@ -452,12 +470,54 @@ export function JarvisAgent() {
     processUserInput(input)
   }
 
+  // Check if input contains task-related keywords
+  const isTaskRelated = (text: string): boolean => {
+    const taskKeywords = [
+      "add task", "create task", "new task",
+      "show tasks", "view tasks", "my tasks", 
+      "pending tasks", "task list", "todo list",
+      "mark task", "complete task", "finish task",
+      "tasks due", "due today"
+    ]
+    
+    return taskKeywords.some(keyword => 
+      text.toLowerCase().includes(keyword.toLowerCase())
+    )
+  }
+
+  // Handle redirection to tasks page
+  const redirectToTasksPage = () => {
+    window.location.href = "/tasks"
+  }
+
   // Process user input
   const processUserInput = async (input: string) => {
     setTurnState(TURN_STATE.THINKING)
     setIsProcessing(true)
     
-    // Check for task-related commands first
+    // Check if the input is task-related for direct redirection
+    if (isTaskRelated(input)) {
+      // Add a message to inform the user about redirection
+      const assistantMessage: Message = {
+        id: Date.now().toString(),
+        role: "assistant",
+        content: "I've detected a task-related request. Redirecting you to the Tasks module where you can manage your tasks more effectively...",
+        timestamp: new Date(),
+      };
+
+      setMessages((prev) => [...prev, assistantMessage]);
+      await speakResponse(assistantMessage.content);
+      setIsProcessing(false);
+      
+      // Redirect after a short delay to allow the user to hear the message
+      setTimeout(() => {
+        redirectToTasksPage()
+      }, 3000);
+      
+      return; // Exit early since we're redirecting
+    }
+    
+    // Check for task-related commands first (for backward compatibility)
     try {
       // Dynamically import the task handler to avoid loading it unnecessarily
       const { handleTaskCommand } = await import('@/lib/voice-commands/task-handler');
@@ -962,116 +1022,141 @@ export function JarvisAgent() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Status indicator */}
-      <div className="flex items-center justify-between mb-4 px-4">
-        <div className="flex items-center">
-          <Avatar className="h-10 w-10 mr-2 bg-primary">
-            <AvatarFallback>J</AvatarFallback>
-          </Avatar>
-          <div>
-            <h2 className="text-lg font-semibold">JARVIS</h2>
-            <div className="flex items-center gap-2">
-              {renderStatusBadge()}
-              {wasInterrupted && (
-                <Badge
-                  variant="outline"
-                  className="bg-yellow-500/10 text-yellow-500 border-yellow-500/20 animate-pulse"
-                >
-                  Interrupted
-                </Badge>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {turnState === TURN_STATE.SPEAKING && (
-          <Button variant="outline" size="sm" onClick={stopSpeaking} className="flex items-center">
-            <VolumeX className="h-4 w-4 mr-1" />
-            Stop Speaking
-          </Button>
-        )}
-      </div>
-
-      {/* Messages container */}
-      <Card className="flex-1 overflow-y-auto mb-4 border-primary/20">
-        <CardContent className="p-4">
+      {/* LiveKit Voice Provider */}
+      {useLiveKit && (
+        <VoiceProviderLiveKit
+          onSpeechStart={() => {
+            if (turnState === TURN_STATE.IDLE) {
+              setTurnState(TURN_STATE.LISTENING)
+            }
+          }}
+          onSpeechEnd={(transcript) => {
+            if (turnState === TURN_STATE.LISTENING && transcript.trim().length > 2) {
+              handleUserInput(transcript)
+            }
+          }}
+          onWakeWord={() => {
+            // When wake word is detected, start listening
+            if (turnState === TURN_STATE.IDLE || turnState === TURN_STATE.SPEAKING) {
+              stopSpeaking()
+              setTurnState(TURN_STATE.LISTENING)
+              toast({
+                title: "Wake Word Detected",
+                description: "How can I help you?",
+              })
+            }
+          }}
+          onInterruption={(transcript) => {
+            if (turnState === TURN_STATE.SPEAKING && transcript.trim().length > 3) {
+              handleInterruption(transcript)
+            }
+          }}
+          onVolumeChange={(volume) => {
+            setAudioVolume(volume)
+          }}
+          isListening={turnState === TURN_STATE.LISTENING}
+          isSpeaking={turnState === TURN_STATE.SPEAKING}
+          userId={conversationId || "default-user"}
+        />
+      )}
+      
+      <Card className="flex-1 overflow-hidden flex flex-col">
+        <CardContent className="flex-1 overflow-y-auto p-4">
           <div className="space-y-4">
             {messages.map((message) => (
               <div
                 key={message.id}
-                className={`flex ${message.role === "user" ? "justify-end" : "justify-start"} mb-4`}
+                className={`flex ${message.role === "assistant" ? "justify-start" : "justify-end"}`}
               >
                 <div
-                  className={`max-w-[80%] rounded-lg p-4 ${
-                    message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"
-                  }`}
+                  className={`flex gap-3 max-w-[80%] ${message.role === "assistant" ? "" : "flex-row-reverse"}`}
                 >
-                  <p className="whitespace-pre-wrap">{message.content}</p>
-                  <p className="text-xs opacity-70 mt-1">{message.timestamp.toLocaleTimeString()}</p>
+                  {message.role === "assistant" && (
+                    <Avatar>
+                      <AvatarFallback>J</AvatarFallback>
+                    </Avatar>
+                  )}
+                  <div>
+                    <div
+                      className={`rounded-lg px-3 py-2 ${message.role === "assistant" ? "bg-muted" : "bg-primary text-primary-foreground"}`}
+                    >
+                      {message.content}
+                    </div>
+                    <div
+                      className={`text-xs text-muted-foreground mt-1 ${message.role === "assistant" ? "text-left" : "text-right"}`}
+                    >
+                      {new Date(message.timestamp).toLocaleTimeString()}
+                    </div>
+                  </div>
                 </div>
               </div>
             ))}
             <div ref={messagesEndRef} />
           </div>
         </CardContent>
-      </Card>
-
-      {/* Voice activity visualization */}
-      {turnState === TURN_STATE.LISTENING && (
-        <div className="mb-4 flex justify-center">
-          <div className="flex items-center space-x-1 h-8">
-            {[...Array(5)].map((_, i) => (
+        <div className="p-4 border-t">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={toggleListening}
+              className={turnState === TURN_STATE.LISTENING ? "bg-red-100 hover:bg-red-200" : ""}
+            >
+              {turnState === TURN_STATE.LISTENING ? <MicOff /> : <Mic />}
+            </Button>
+            <input
+              type="text"
+              value={userInput}
+              onChange={(e) => setUserInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  handleUserInput(userInput)
+                }
+              }}
+              placeholder="Type a message or press the mic to speak..."
+              className="flex-1 border rounded-md px-3 py-2"
+              disabled={isProcessing}
+            />
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => handleUserInput(userInput)}
+              disabled={!userInput.trim() || isProcessing}
+            >
+              {isProcessing ? <Loader2 className="animate-spin" /> : <Send />}
+            </Button>
+            {turnState === TURN_STATE.SPEAKING && (
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={stopSpeaking}
+                className="bg-red-100 hover:bg-red-200"
+              >
+                <VolumeX />
+              </Button>
+            )}
+          </div>
+          <div className="flex justify-between items-center mt-2">
+            <div className="flex items-center gap-2">
+              <Badge variant={turnState === TURN_STATE.IDLE ? "outline" : "default"}>
+                {turnState === TURN_STATE.IDLE && "Ready"}
+                {turnState === TURN_STATE.LISTENING && "Listening"}
+                {turnState === TURN_STATE.THINKING && "Thinking"}
+                {turnState === TURN_STATE.SPEAKING && "Speaking"}
+              </Badge>
+              {wasInterrupted && <Badge variant="destructive">Interrupted</Badge>}
+              {useLiveKit && <Badge variant="secondary">LiveKit</Badge>}
+            </div>
+            <div className="h-1 w-24 bg-gray-200 rounded-full overflow-hidden">
               <div
-                key={i}
-                className="w-2 bg-primary rounded-full transition-all duration-200"
-                style={{
-                  height: `${Math.max(15, audioVolume * 100 * (0.5 + Math.sin(i / 2) * 0.5))}%`,
-                  opacity: 0.6 + i / 10,
-                }}
+                className={`h-full ${turnState === TURN_STATE.LISTENING ? "bg-red-500" : "bg-blue-500"}`}
+                style={{ width: `${audioVolume * 100}%` }}
               ></div>
-            ))}
+            </div>
           </div>
         </div>
-      )}
-
-      {/* Input area */}
-      <div className="flex items-end gap-2">
-        <Button
-          onClick={toggleListening}
-          disabled={turnState === TURN_STATE.THINKING}
-          className={`h-14 w-14 rounded-full ${
-            turnState === TURN_STATE.LISTENING ? "bg-red-500 hover:bg-red-600" : "bg-primary hover:bg-primary/90"
-          }`}
-        >
-          {turnState === TURN_STATE.LISTENING ? (
-            <MicOff className="h-6 w-6 text-white" />
-          ) : (
-            <Mic className="h-6 w-6 text-white" />
-          )}
-        </Button>
-
-        <form onSubmit={handleSubmit} className="flex-1 flex">
-          <input
-            type="text"
-            value={userInput}
-            onChange={(e) => setUserInput(e.target.value)}
-            placeholder={turnState === TURN_STATE.LISTENING ? "Listening..." : "Type a message..."}
-            disabled={turnState === TURN_STATE.LISTENING || turnState === TURN_STATE.THINKING}
-            className="flex-1 rounded-l-md border border-r-0 border-primary/30 bg-background p-3 focus:outline-none focus:ring-2 focus:ring-primary/50"
-          />
-          <Button
-            type="submit"
-            disabled={!userInput.trim() || turnState === TURN_STATE.THINKING || turnState === TURN_STATE.SPEAKING}
-            className="rounded-l-none"
-          >
-            {turnState === TURN_STATE.THINKING ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <Send className="h-5 w-5" />
-            )}
-          </Button>
-        </form>
-      </div>
+      </Card>
     </div>
   )
 }

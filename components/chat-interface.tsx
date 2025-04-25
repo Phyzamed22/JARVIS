@@ -10,8 +10,8 @@ import { Send, Loader2 } from "lucide-react"
 
 interface Message {
   id: string
-  sender: "user" | "agent"
-  text: string
+  role: "user" | "assistant"
+  content: string
   timestamp: Date
   audioUrl?: string
 }
@@ -36,17 +36,68 @@ export function ChatInterface({ initialMessages = [], conversationId }: ChatInte
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, isTyping])
 
+  // Check if input contains task-related keywords
+  const isTaskRelated = (text: string): boolean => {
+    const taskKeywords = [
+      "add task", "create task", "new task",
+      "show tasks", "view tasks", "my tasks", 
+      "pending tasks", "task list", "todo list",
+      "mark task", "complete task", "finish task",
+      "tasks due", "due today"
+    ]
+    
+    return taskKeywords.some(keyword => 
+      text.toLowerCase().includes(keyword.toLowerCase())
+    )
+  }
+
+  // Handle redirection to tasks page
+  const redirectToTasksPage = () => {
+    window.location.href = "/tasks"
+  }
+
   // Handle text input submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
     if (!inputText.trim() || isProcessing) return
+    
+    // Check if the input is task-related
+    if (isTaskRelated(inputText)) {
+      // Add user message
+      const userMessage: Message = {
+        id: Date.now().toString(),
+        role: "user",
+        content: inputText,
+        timestamp: new Date(),
+      }
+      
+      setMessages((prev) => [...prev, userMessage])
+      setInputText("")
+      
+      // Add system message about redirection
+      const systemMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: "I've detected a task-related request. Redirecting you to the Tasks module where you can manage your tasks more effectively...",
+        timestamp: new Date(),
+      }
+      
+      setMessages((prev) => [...prev, systemMessage])
+      
+      // Redirect after a short delay to allow the user to see the message
+      setTimeout(() => {
+        redirectToTasksPage()
+      }, 2000)
+      
+      return
+    }
 
     // Add user message
     const userMessage: Message = {
       id: Date.now().toString(),
-      sender: "user",
-      text: inputText,
+      role: "user",
+      content: inputText,
       timestamp: new Date(),
     }
 
@@ -68,8 +119,8 @@ export function ChatInterface({ initialMessages = [], conversationId }: ChatInte
         body: JSON.stringify({
           messages: [
             ...messages.map((m) => ({
-              role: m.sender === "user" ? "user" : "assistant",
-              content: m.text,
+              role: m.role,
+              content: m.content,
             })),
             { role: "user", content: inputText },
           ],
@@ -95,8 +146,8 @@ export function ChatInterface({ initialMessages = [], conversationId }: ChatInte
       // Add agent message
       const agentMessage: Message = {
         id: Date.now().toString(),
-        sender: "agent",
-        text: data.text,
+        role: "assistant",
+        content: data.text,
         timestamp: new Date(),
       }
 
@@ -134,8 +185,8 @@ export function ChatInterface({ initialMessages = [], conversationId }: ChatInte
           ...prev,
           {
             id: Date.now().toString(),
-            sender: "agent",
-            text: "I'm sorry, I encountered an error processing your request. Please try again.",
+            role: "assistant",
+            content: "I'm sorry, I encountered an error processing your request. Please try again.",
             timestamp: new Date(),
           },
         ])

@@ -16,8 +16,13 @@ class NotionService {
 
   constructor() {
     // Initialize the Notion client with the API token from environment variables
+    const token = process.env.NOTION_API_TOKEN;
+    if (!token) {
+      console.error('NOTION_API_TOKEN not set in environment variables');
+    }
+    
     this.client = new Client({
-      auth: process.env.NOTION_API_TOKEN,
+      auth: token,
     });
     
     // Get database IDs from environment variables
@@ -25,8 +30,14 @@ class NotionService {
     this.notesDatabaseId = process.env.NOTION_NOTES_DATABASE_ID || '';
     
     if (!this.tasksDatabaseId) {
-      console.warn('NOTION_TASKS_DATABASE_ID not set in environment variables');
+      console.error('NOTION_TASKS_DATABASE_ID not set in environment variables');
     }
+    
+    console.log('Notion Service initialized with:', {
+      hasToken: !!token,
+      hasTasksDB: !!this.tasksDatabaseId,
+      hasNotesDB: !!this.notesDatabaseId
+    });
   }
 
   /**

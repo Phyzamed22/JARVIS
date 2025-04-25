@@ -1,4 +1,4 @@
-\"use client";
+"use client";
 
 import { useState, useEffect } from 'react';
 import { Calendar, Clock, CheckCircle2, Circle, AlertCircle, Plus, Trash } from 'lucide-react';
@@ -45,16 +45,18 @@ export function TasksModule() {
       const response = await fetch(`/api/tasks?type=${type}`);
       
       if (!response.ok) {
-        throw new Error('Failed to fetch tasks');
+        const errorData = await response.json();
+        throw new Error(errorData.details || 'Failed to fetch tasks');
       }
       
       const data = await response.json();
+      console.log('Fetched tasks:', data);
       setTasks(data.tasks || []);
     } catch (error) {
       console.error('Error fetching tasks:', error);
       toast({
         title: 'Error',
-        description: 'Failed to load tasks. Please try again.',
+        description: 'Failed to load tasks from Notion. Please check your Notion integration settings.',
         variant: 'destructive',
       });
     } finally {
@@ -82,8 +84,12 @@ export function TasksModule() {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to create task');
+        const errorData = await response.json();
+        throw new Error(errorData.details || 'Failed to create task');
       }
+
+      const result = await response.json();
+      console.log('Task creation response:', result);
 
       // Reset form and close dialog
       setNewTask({
@@ -98,7 +104,7 @@ export function TasksModule() {
       
       toast({
         title: 'Success',
-        description: 'Task created successfully',
+        description: 'Task created successfully in Notion',
       });
     } catch (error) {
       console.error('Error creating task:', error);
