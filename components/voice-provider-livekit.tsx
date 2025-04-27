@@ -12,6 +12,11 @@ import {
   disconnectLiveKit
 } from "@/lib/livekit"
 
+// Audio processing constants for noise cancellation
+const NOISE_REDUCTION_AMOUNT = 0.7 // Amount of noise reduction (0-1)
+const ECHO_CANCELLATION_STRENGTH = 0.8 // Strength of echo cancellation (0-1)
+const AUDIO_DUCKING_AMOUNT = 0.85 // Amount to reduce mic sensitivity during playback (0-1)
+
 interface VoiceProviderLiveKitProps {
   onSpeechStart?: () => void
   onSpeechEnd?: (transcript: string) => void
@@ -39,6 +44,7 @@ export function VoiceProviderLiveKit({
   const [roomName, setRoomName] = useState<string>("") 
   const [wakeWordActive, setWakeWordActive] = useState(false)
   const [currentVolume, setCurrentVolume] = useState(0)
+  const [isDucking, setIsDucking] = useState(false) // Track if audio ducking is active
   
   // Refs
   const livekitClientRef = useRef(getLiveKitClient())
@@ -50,6 +56,9 @@ export function VoiceProviderLiveKit({
   const analyserRef = useRef<AnalyserNode | null>(null)
   const micStreamRef = useRef<MediaStream | null>(null)
   const animationFrameRef = useRef<number | null>(null)
+  const gainNodeRef = useRef<GainNode | null>(null) // Gain node for audio ducking
+  const noiseReducerRef = useRef<any>(null) // Noise reducer node
+  const echoCancellationRef = useRef<boolean>(false) // Track if echo cancellation is active
   
   const { toast } = useToast()
 
@@ -180,8 +189,52 @@ export function VoiceProviderLiveKit({
       if (settings.livekitInterruptionEnabled) {
         startSpeechRecognition()
       }
+      
+      // Apply audio ducking when Jarvis is speaking to reduce mic sensitivity
+      applyAudioDucking(true)
+    } else {
+      // Remove audio ducking when Jarvis stops speaking
+      applyAudioDucking(false)
     }
   }, [isSpeaking, isInitialized])
+  
+  // Apply audio ducking to reduce microphone sensitivity during playback
+  const applyAudioDucking = (enable: boolean) => {
+    if (!gainNodeRef.current || !audioContextRef.current) return
+    
+    setIsDucking(enable)
+    
+    // When Jarvis is speaking, reduce microphone sensitivity
+    if (enable) {
+      // Gradually reduce gain to avoid abrupt changes
+      const now = audioContextRef.current.currentTime
+      gainNodeRef.current.gain.cancelScheduledValues(now)
+      gainNodeRef.current.gain.setValueAtTime(gainNodeRef.current.gain.value, now)
+      gainNodeRef.current.gain.linearRampToValueAtTime(1 - AUDIO_DUCKING_AMOUNT, now + 0.1)
+      
+      // Increase VAD threshold during speech to prevent false triggers
+      if (vadRef.current) {
+        vadRef.current.adjustThreshold(0.15) // Higher threshold during playback
+      }
+      
+      // Enable stronger echo cancellation during playback
+      echoCancellationRef.current = true
+    } else {
+      // Gradually restore gain when Jarvis stops speaking
+      const now = audioContextRef.current.currentTime
+      gainNodeRef.current.gain.cancelScheduledValues(now)
+      gainNodeRef.current.gain.setValueAtTime(gainNodeRef.current.gain.value, now)
+      gainNodeRef.current.gain.linearRampToValueAtTime(1.0, now + 0.2)
+      
+      // Restore normal VAD threshold
+      if (vadRef.current) {
+        vadRef.current.adjustThreshold(0.08) // Normal threshold
+      }
+      
+      // Return to normal echo cancellation
+      echoCancellationRef.current = false
+    }
+  }
   
   // Setup audio monitoring for volume visualization and VAD
   const setupAudioMonitoring = async () => {
@@ -202,9 +255,7 @@ export function VoiceProviderLiveKit({
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-          // Add latency hint to reduce processing delay
-          latency: 0.01,
-          sampleRate: 44100, // Higher sample rate for better quality
+          sampleRate: 48000, // Higher sample rate for better quality
           channelCount: 1, // Mono is sufficient and more efficient
         },
       })
@@ -231,20 +282,60 @@ export function VoiceProviderLiveKit({
         analyser.smoothingTimeConstant = 0.3 // Less smoothing for faster response
         
         const source = audioContextRef.current.createMediaStreamSource(stream)
-        source.connect(analyser)
         
-        // Start monitoring volume with optimized buffer
+        // Create advanced audio processing chain for noise cancellation
+        
+        // 1. Create gain node for audio ducking
+        const gainNode = audioContextRef.current.createGain()
+        gainNodeRef.current = gainNode
+        gainNode.gain.value = 1.0 // Start with normal gain
+        
+        // 2. Add noise reduction if Web Audio API supports it
+        let processedOutput: AudioNode = source
+        if (audioContextRef.current.createDynamicsCompressor) {
+          // Create dynamics compressor for noise reduction
+          const compressor = audioContextRef.current.createDynamicsCompressor()
+          compressor.threshold.value = -50 + (NOISE_REDUCTION_AMOUNT * 20) // Adjust threshold based on noise reduction amount
+          compressor.knee.value = 40 * NOISE_REDUCTION_AMOUNT
+          compressor.ratio.value = 12
+          compressor.attack.value = 0
+          compressor.release.value = 0.25
+          
+          // Connect source to compressor
+          source.connect(compressor)
+          processedOutput = compressor
+          noiseReducerRef.current = compressor
+        } else {
+          // If compressor not available, connect source directly to gain node
+          source.connect(gainNode)
+        }
+        
+        // 3. Connect to gain node for audio ducking (if not already connected)
+        if (processedOutput !== source) {
+          processedOutput.connect(gainNode)
+        }
+        
+        // 4. Connect to analyser for visualization and VAD
+        gainNode.connect(analyser)
+        
+        // Start monitoring volume with optimized buffer and reduced latency
         const dataArray = new Uint8Array(analyser.frequencyBinCount)
+        
+        // Create a connection quality monitor
+        let connectionQuality = 'good'
+        let lastConnectionCheck = Date.now()
+        const connectionCheckInterval = 5000 // Check every 5 seconds
         
         const updateVolume = () => {
           if (!analyserRef.current) return
           
+          // Get frequency data for volume visualization
           analyserRef.current.getByteFrequencyData(dataArray)
           
           // Calculate RMS volume with optimization
           let sum = 0
           // Process only a subset of the data for efficiency
-          const stride = 2 // Skip every other sample
+          const stride = 4 // Skip more samples for even faster processing
           for (let i = 0; i < dataArray.length; i += stride) {
             sum += dataArray[i] * dataArray[i]
           }
@@ -256,7 +347,7 @@ export function VoiceProviderLiveKit({
           onVolumeChange?.(normalizedVolume)
           
           // Process audio data with VAD if available
-          if (vadRef.current && isListening) {
+          if (vadRef.current && isListening && !isDucking) { // Don't process VAD during ducking
             const audioData = new Float32Array(analyser.frequencyBinCount)
             analyserRef.current.getFloatTimeDomainData(audioData)
             
@@ -266,6 +357,49 @@ export function VoiceProviderLiveKit({
             }
           }
           
+          // Check connection quality periodically
+          const now = Date.now()
+          if (now - lastConnectionCheck > connectionCheckInterval) {
+            lastConnectionCheck = now
+            
+            // Get connection quality from LiveKit client
+            if (livekitClientRef.current) {
+              // Safely check if getConnectionQuality method exists
+              const quality = livekitClientRef.current.getConnectionQuality ? 
+                livekitClientRef.current.getConnectionQuality() : 'good'
+              
+              // Adjust audio processing based on connection quality
+              if (quality !== connectionQuality) {
+                connectionQuality = quality
+                
+                if (quality === 'poor') {
+                  // Reduce audio quality to maintain low latency
+                  if (analyserRef.current) {
+                    analyserRef.current.fftSize = 256 // Smallest FFT size for lowest latency
+                    analyserRef.current.smoothingTimeConstant = 0.1 // Less smoothing
+                  }
+                  
+                  // Increase VAD threshold to reduce false positives
+                  if (vadRef.current) {
+                    vadRef.current.adjustThreshold(0.12)
+                  }
+                } else if (quality === 'good' || quality === 'excellent') {
+                  // Restore normal audio quality
+                  if (analyserRef.current) {
+                    analyserRef.current.fftSize = 512
+                    analyserRef.current.smoothingTimeConstant = 0.2
+                  }
+                  
+                  // Restore normal VAD threshold
+                  if (vadRef.current && !isDucking) {
+                    vadRef.current.adjustThreshold(0.08)
+                  }
+                }
+              }
+            }
+          }
+          
+          // Use optimized animation frame timing
           animationFrameRef.current = requestAnimationFrame(updateVolume)
         }
         
@@ -372,6 +506,10 @@ export function VoiceProviderLiveKit({
           <div>Room: {roomName}</div>
           <div>Wake Word: {wakeWordActive ? "Active" : "Inactive"}</div>
           <div>Volume: {Math.floor(currentVolume * 100)}%</div>
+          <div>Audio Ducking: {isDucking ? "Active" : "Inactive"}</div>
+          <div>Echo Cancellation: {echoCancellationRef.current ? "Enhanced" : "Normal"}</div>
+          <div>Listening: {isListening ? "Yes" : "No"}</div>
+          <div>Speaking: {isSpeaking ? "Yes" : "No"}</div>
         </div>
       )}
     </div>

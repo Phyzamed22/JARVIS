@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { VoiceProviderLiveKit } from "@/components/voice-provider-livekit"
 import { getVoiceSettings } from "@/lib/voice-settings-service"
+import { TaskRedirectHandler } from "@/components/task-redirect-handler"
 
 // Define turn states
 const TURN_STATE = {
@@ -470,21 +471,6 @@ export function JarvisAgent() {
     processUserInput(input)
   }
 
-  // Check if input contains task-related keywords
-  const isTaskRelated = (text: string): boolean => {
-    const taskKeywords = [
-      "add task", "create task", "new task",
-      "show tasks", "view tasks", "my tasks", 
-      "pending tasks", "task list", "todo list",
-      "mark task", "complete task", "finish task",
-      "tasks due", "due today"
-    ]
-    
-    return taskKeywords.some(keyword => 
-      text.toLowerCase().includes(keyword.toLowerCase())
-    )
-  }
-
   // Handle redirection to tasks page
   const redirectToTasksPage = () => {
     window.location.href = "/tasks"
@@ -495,26 +481,53 @@ export function JarvisAgent() {
     setTurnState(TURN_STATE.THINKING)
     setIsProcessing(true)
     
-    // Check if the input is task-related for direct redirection
-    if (isTaskRelated(input)) {
-      // Add a message to inform the user about redirection
-      const assistantMessage: Message = {
-        id: Date.now().toString(),
-        role: "assistant",
-        content: "I've detected a task-related request. Redirecting you to the Tasks module where you can manage your tasks more effectively...",
-        timestamp: new Date(),
-      };
+    // Use the enhanced task detection service
+    try {
+      const { detectTaskIntent, logTaskDetection } = await import('@/lib/task-detection-service');
+      const taskDetection = detectTaskIntent(input);
+      
+      // Log detailed task detection information for debugging
+      logTaskDetection(input, taskDetection);
+      
+      // If task-related with high confidence, handle appropriately
+      if (taskDetection.isTaskRelated && taskDetection.shouldRedirect) {
+        console.log(`Task detected with ${taskDetection.confidence.toFixed(2)} confidence. Action: ${taskDetection.action || 'unknown'}`);
+        
+        // Create appropriate message based on the detected action
+        let responseMessage = "I've detected a task-related request. ";
+        
+        if (taskDetection.action === 'create' && taskDetection.taskName) {
+          responseMessage += `I'll help you create a task for "${taskDetection.taskName}". `;
+        } else if (taskDetection.action === 'view') {
+          responseMessage += "I'll show you your tasks. ";
+        } else if (taskDetection.action === 'update') {
+          responseMessage += "I'll help you update that task. ";
+        }
+        
+        responseMessage += "Redirecting you to the Tasks module where you can manage your tasks more effectively...";
+        
+        // Add the assistant message
+        const assistantMessage: Message = {
+          id: Date.now().toString(),
+          role: "assistant",
+          content: responseMessage,
+          timestamp: new Date(),
+        };
 
-      setMessages((prev) => [...prev, assistantMessage]);
-      await speakResponse(assistantMessage.content);
-      setIsProcessing(false);
-      
-      // Redirect after a short delay to allow the user to hear the message
-      setTimeout(() => {
-        redirectToTasksPage()
-      }, 3000);
-      
-      return; // Exit early since we're redirecting
+        setMessages((prev) => [...prev, assistantMessage]);
+        await speakResponse(assistantMessage.content);
+        setIsProcessing(false);
+        
+        // Redirect after a short delay to allow the user to hear the message
+        setTimeout(() => {
+          redirectToTasksPage()
+        }, 3000);
+        
+        return; // Exit early since we're redirecting
+      }
+    } catch (error) {
+      console.error("Error in task detection:", error);
+      // Continue with normal processing if task detection fails
     }
     
     // Check for task-related commands first (for backward compatibility)

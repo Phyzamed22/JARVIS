@@ -1,4 +1,5 @@
 import { Client } from '@notionhq/client';
+import notionLogger from './notion-logger';
 
 interface NotionTask {
   id?: string;
@@ -13,12 +14,13 @@ class NotionService {
   private client: Client;
   private tasksDatabaseId: string;
   private notesDatabaseId: string;
+  private isConfigured: boolean = false;
 
   constructor() {
     // Initialize the Notion client with the API token from environment variables
     const token = process.env.NOTION_API_TOKEN;
     if (!token) {
-      console.error('NOTION_API_TOKEN not set in environment variables');
+      notionLogger.logError('initialization', 'NOTION_API_TOKEN not set in environment variables');
     }
     
     this.client = new Client({
@@ -30,14 +32,64 @@ class NotionService {
     this.notesDatabaseId = process.env.NOTION_NOTES_DATABASE_ID || '';
     
     if (!this.tasksDatabaseId) {
-      console.error('NOTION_TASKS_DATABASE_ID not set in environment variables');
+      notionLogger.logError('initialization', 'NOTION_TASKS_DATABASE_ID not set in environment variables');
     }
     
-    console.log('Notion Service initialized with:', {
+    // Check if the database ID is in URL format and extract the ID portion
+    if (this.tasksDatabaseId && this.tasksDatabaseId.includes('notion.so')) {
+      try {
+        // Extract the ID from the URL format
+        const idMatch = this.tasksDatabaseId.match(/([a-zA-Z0-9]+)(?:\?v=|$)/);
+        if (idMatch && idMatch[1]) {
+          this.tasksDatabaseId = idMatch[1];
+          notionLogger.logSuccess('id extraction', { 
+            message: 'Extracted Notion database ID from URL',
+            extractedId: this.tasksDatabaseId 
+          });
+        }
+      } catch (error) {
+        notionLogger.logError('id extraction', error);
+      }
+    }
+    
+    // Check if configuration is valid
+    this.isConfigured = !!token && !!this.tasksDatabaseId;
+    
+    // Log initialization status
+    const initStatus = {
       hasToken: !!token,
+      tokenLength: token ? token.length : 0,
+      tasksDatabaseId: this.tasksDatabaseId,
       hasTasksDB: !!this.tasksDatabaseId,
-      hasNotesDB: !!this.notesDatabaseId
-    });
+      hasNotesDB: !!this.notesDatabaseId,
+      isConfigured: this.isConfigured
+    };
+    
+    if (this.isConfigured) {
+      notionLogger.logSuccess('initialization', initStatus);
+    } else {
+      notionLogger.logError('initialization', { message: 'Incomplete configuration', details: initStatus });
+    }
+    
+    // Test connection if configured
+    if (this.isConfigured) {
+      this.testConnection();
+    }
+  }
+  
+  /**
+   * Test the connection to Notion API
+   */
+  async testConnection(): Promise<boolean> {
+    try {
+      // Try to fetch a single task to verify connectivity
+      await this.getPendingTasks(1);
+      notionLogger.logSuccess('connection test', { message: 'Successfully connected to Notion API' });
+      return true;
+    } catch (error) {
+      notionLogger.logError('connection test', error);
+      return false;
+    }
   }
 
   /**
@@ -46,13 +98,17 @@ class NotionService {
   async createTask(task: NotionTask): Promise<any> {
     try {
       if (!this.tasksDatabaseId) {
-        throw new Error('Tasks database ID not configured');
+        const error = new Error('Tasks database ID not configured');
+        notionLogger.logError('create task', error);
+        throw error;
       }
 
+      notionLogger.logSuccess('create task attempt', { taskName: task.name, dueDate: task.dueDate });
+      
       const response = await this.client.pages.create({
         parent: { database_id: this.tasksDatabaseId },
         properties: {
-          Name: {
+          name: {
             title: [
               {
                 text: {
@@ -61,27 +117,27 @@ class NotionService {
               },
             ],
           },
-          Status: {
+          status: {
             select: {
               name: task.status,
             },
           },
           ...(task.dueDate && {
-            'Due Date': {
+            'due date': {
               date: {
                 start: task.dueDate,
               },
             },
           }),
           ...(task.priority && {
-            Priority: {
+            priority: {
               select: {
                 name: task.priority,
               },
             },
           }),
           ...(task.notes && {
-            Notes: {
+            notes: {
               rich_text: [
                 {
                   text: {
@@ -94,35 +150,66 @@ class NotionService {
         },
       });
 
+      notionLogger.logSuccess('create task', { 
+        taskName: task.name, 
+        taskId: response.id,
+        status: 'success'
+      });
+      
       return response;
     } catch (error) {
-      console.error('Error creating task in Notion:', error);
+      notionLogger.logError('create task', error);
       throw error;
     }
   }
 
   /**
    * Get all pending tasks from the Notion database
+   * @param limit Optional limit on the number of tasks to return
    */
-  async getPendingTasks(): Promise<NotionTask[]> {
+  async getPendingTasks(limit?: number): Promise<NotionTask[]> {
     try {
       if (!this.tasksDatabaseId) {
         throw new Error('Tasks database ID not configured');
       }
 
-      const response = await this.client.databases.query({
+      if (!this.client.auth) {
+        throw new Error('Notion API token not configured or invalid');
+      }
+
+      console.log(`Attempting to query Notion database: ${this.tasksDatabaseId}`);
+      
+      const queryParams: any = {
         database_id: this.tasksDatabaseId,
         filter: {
-          property: 'Status',
+          property: 'status',
           select: {
             equals: 'Pending',
           },
         },
-      });
+      };
+      
+      // Add page_size if limit is specified
+      if (limit && limit > 0) {
+        queryParams.page_size = limit;
+      }
+
+      const response = await this.client.databases.query(queryParams);
+      console.log(`Successfully retrieved ${response.results.length} pending tasks from Notion`);
 
       return this.formatTaskResults(response.results);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching pending tasks from Notion:', error);
+      // Log more detailed error information
+      if (error.code) {
+        console.error(`Notion API Error Code: ${error.code}`);
+      }
+      if (error.status) {
+        console.error(`HTTP Status: ${error.status}`);
+      }
+      if (error.message) {
+        console.error(`Error Message: ${error.message}`);
+      }
       throw error;
     }
   }
@@ -141,7 +228,7 @@ class NotionService {
       const response = await this.client.databases.query({
         database_id: this.tasksDatabaseId,
         filter: {
-          property: 'Due Date',
+          property: 'due date',
           date: {
             equals: today,
           },
@@ -163,7 +250,7 @@ class NotionService {
       const response = await this.client.pages.update({
         page_id: taskId,
         properties: {
-          Status: {
+          status: {
             select: {
               name: status,
             },
@@ -187,11 +274,11 @@ class NotionService {
       
       return {
         id: page.id,
-        name: properties.Name.title[0]?.text.content || 'Untitled Task',
-        status: properties.Status?.select?.name || 'Pending',
-        dueDate: properties['Due Date']?.date?.start,
-        priority: properties.Priority?.select?.name,
-        notes: properties.Notes?.rich_text[0]?.text.content,
+        name: properties.name.title[0]?.text.content || 'Untitled Task',
+        status: properties.status?.select?.name || 'Pending',
+        dueDate: properties['due date']?.date?.start,
+        priority: properties.priority?.select?.name,
+        notes: properties.notes?.rich_text[0]?.text.content,
       };
     });
   }

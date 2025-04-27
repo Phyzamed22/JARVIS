@@ -1,6 +1,6 @@
 "use client"
 
-import { Room, RoomEvent, LocalParticipant, RemoteParticipant, Track, AudioTrack, ConnectionState } from 'livekit-client'
+import { Room, RoomEvent, LocalParticipant, RemoteParticipant, Track, AudioTrack, ConnectionState, ParticipantEvent } from 'livekit-client'
 import { getVoiceSettings } from './voice-settings-service'
 
 // LiveKit client instance
@@ -52,8 +52,22 @@ export async function initializeLiveKit(userId: string): Promise<boolean> {
         adaptiveStream: true,
         // Enable dynacast for optimized SFU routing
         dynacast: true,
-        // Audio settings can be configured via audioOutput or audioCaptureDefaults
-        // but not with audioOptimizationMode as it's not a valid property
+        // Optimize audio settings for minimal latency and noise cancellation
+        audioCaptureDefaults: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 48000, // Higher sample rate for better quality
+          channelCount: 1, // Mono for efficiency
+          // Advanced audio processing options
+          advanced: [
+            { echoCancellationType: 'system' },
+            { autoGainControl: { idealGain: 0.8 } },
+            { noiseSuppression: { level: 'high' } }
+          ]
+        },
+        // Reduce connection timeout for faster error detection
+        connectionTimeout: 8000 // 8 seconds instead of default 15s
       })
       
       // Set up event listeners
@@ -76,8 +90,7 @@ export async function initializeLiveKit(userId: string): Promise<boolean> {
       await livekitClient.connect(settings.livekitServerUrl, token, {
         autoSubscribe: true, // Automatically subscribe to other participants' tracks
         // Use maxRetries for reconnection attempts
-        maxRetries: 3,
-        // Note: timeoutMs is not a valid option in InternalRoomConnectOptions
+        maxRetries: 3
       })
       console.log('Successfully connected to LiveKit cloud server')
     } catch (connectionError) {
@@ -153,6 +166,12 @@ function setupRoomEventListeners(room: Room) {
   // When a new track is published
   room.on(RoomEvent.TrackPublished, (publication, participant) => {
     console.log('Track published:', publication.kind, 'by', participant.identity)
+  })
+  
+  // Monitor audio levels for participants
+  room.localParticipant.on(ParticipantEvent.AudioLevelChanged, (level: number) => {
+    // Handle audio level changes
+    console.log('Local participant audio level changed:', level)
   })
   
   // Error handling

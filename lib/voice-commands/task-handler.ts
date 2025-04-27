@@ -2,15 +2,21 @@
  * Task Handler for Voice Commands
  * 
  * This module handles voice commands related to task management using Notion API.
+ * It supports task-specific wake words and redirects to the tasks window.
  */
 
 import notionService from '@/lib/notion-service';
+import { containsTaskWakeWord, extractTaskCommand, shouldRedirectToTasksWindow } from '../crewai/task-wake-words';
+import crewAITaskManager from '../crewai/task-manager';
+import { generateVoiceResponse } from '../elevenlabs';
+import { getVoiceSettings } from '../voice-settings-service';
 
 interface TaskCommandResult {
   executed: boolean;
   message?: string;
   error?: string;
   data?: any;
+  shouldRedirect?: boolean;
 }
 
 /**
@@ -85,6 +91,10 @@ function extractTaskDetails(command: string) {
 export async function handleTaskCommand(command: string): Promise<TaskCommandResult> {
   const lowerCommand = command.toLowerCase();
   
+  // Check if this is a task-specific command using wake words
+  const isTaskCommand = containsTaskWakeWord(command);
+  const shouldRedirect = shouldRedirectToTasksWindow(command);
+  
   try {
     // Command: Add a task
     if (lowerCommand.includes('add a task') || lowerCommand.includes('add task') || 
@@ -107,10 +117,23 @@ export async function handleTaskCommand(command: string): Promise<TaskCommandRes
       
       const response = await notionService.createTask(task);
       
+      // Generate voice response if enabled
+      const settings = getVoiceSettings();
+      const responseMessage = `Task "${name}" has been added${dueDate ? ' with due date ' + new Date(dueDate).toLocaleDateString() : ''}.`;
+      
+      if (settings.synthesisEnabled) {
+        try {
+          await generateVoiceResponse(responseMessage, settings.elevenLabsVoiceId);
+        } catch (error) {
+          console.error('Error generating voice response:', error);
+        }
+      }
+      
       return {
         executed: true,
-        message: `Task "${name}" has been added${dueDate ? ' with due date ' + new Date(dueDate).toLocaleDateString() : ''}.`,
+        message: responseMessage,
         data: response,
+        shouldRedirect: shouldRedirect
       };
     }
     

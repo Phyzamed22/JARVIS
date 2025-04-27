@@ -59,18 +59,21 @@ class LiveKitClient {
       let retryCount = 0;
       let connected = false;
 
-      // Create a new room instance with optimized settings
+      // Create a new room instance with optimized settings for low latency
       this.room = new Room({
         adaptiveStream: true,
         dynacast: true,
-        // Add optimized audio settings
+        // Add optimized audio settings for noise cancellation and echo reduction
         audioCaptureDefaults: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true,
+          autoGainControl: true
+          // Remove 'advanced' property as it's not supported in AudioCaptureOptions
         },
-        // Reduce connection timeout for faster error detection
-        connectionTimeout: 10000, // 10 seconds instead of default 15s
+        // Optimize for low latency voice communication
+        stopMicTrackOnMute: false, // Keep track alive when muted for faster unmuting
+        // Prioritize low latency over quality
+        videoCodec: 'vp8', // Faster encoding/decoding than VP9/H.264
       });
 
       // Set up event listeners
@@ -85,7 +88,7 @@ class LiveKitClient {
             await new Promise(resolve => setTimeout(resolve, 1000));
           }
 
-          // Connect to the room with optimized settings
+          // Connect to the room with optimized settings for minimal latency
           await this.room.connect(this.serverUrl, token, {
             autoSubscribe: true,
             rtcConfig: {
@@ -96,6 +99,29 @@ class LiveKitClient {
               ],
               // Reduce ICE candidate gathering time
               iceCandidatePoolSize: 10,
+              // Optimize for low latency
+              iceTransportPolicy: 'all',
+              // Prioritize UDP for lower latency
+              bundlePolicy: 'max-bundle',
+            },
+            // Optimize publish parameters for voice
+            publishDefaults: {
+              simulcast: false, // Disable simulcast for audio-only
+              audioPreset: AudioPresets.musicHighQuality, // Optimize for voice
+              dtx: true, // Enable Discontinuous Transmission for more efficient bandwidth usage
+              red: true, // Enable redundant encoding for better quality under packet loss
+              forceStereo: false, // Use mono for voice to reduce bandwidth
+            }
+          });
+          
+          // Monitor connection quality to dynamically adjust settings
+          this.room.on(RoomEvent.ConnectionQualityChanged, (quality: ConnectionQuality) => {
+            if (quality === ConnectionQuality.Poor) {
+              // If connection quality is poor, log the quality change
+              console.log('Connection quality is poor, consider reducing bandwidth usage');
+            } else if (quality === ConnectionQuality.Excellent) {
+              // If connection quality is excellent, log the quality change
+              console.log('Connection quality is excellent');
             }
           });
 
@@ -214,7 +240,7 @@ class LiveKitClient {
   public getRemoteParticipants(): RemoteParticipant[] {
     if (!this.room) return [];
     // Use the correct property to access participants
-    return Array.from(this.room.getParticipants());
+    return Array.from(this.room.remoteParticipants.values());
   }
 
   /**
@@ -261,7 +287,7 @@ class LiveKitClient {
     });
 
     // Audio level changes
-    participant.on('audioLevelChanged', (level) => {
+    participant.on(ParticipantEvent.AudioLevelChanged, (level) => {
       this.onVolumeChangeCallbacks.forEach(callback => 
         callback(participant, level));
     });

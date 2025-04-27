@@ -1,5 +1,6 @@
 // Define the search result interface
 import { getAIService } from "@/lib/ai-service"
+import { getAgentService } from "@/lib/agent-service"
 
 export interface SearchResult {
   title: string
@@ -19,6 +20,7 @@ export interface SearchResult {
     title: string
     link: string
   }[]
+  agentTaskId?: string
 }
 
 export interface SearchResponse {
@@ -121,6 +123,27 @@ export class SearchService {
         return "Please provide a search query."
       }
 
+      // Check if this query requires advanced agent capabilities
+      const agentService = getAgentService()
+      const isComplexQuery = await this.isComplexQuery(query)
+      
+      if (isComplexQuery && agentService.isConfigured()) {
+        try {
+          // Use the agent service for complex queries that require web automation
+          const agentResponse = await agentService.executeTask(query)
+          
+          if (agentResponse.taskId) {
+            return `I'm working on your complex query using advanced web capabilities. ${agentResponse.text}`
+          }
+          
+          return agentResponse.text
+        } catch (agentError) {
+          console.error("Error using agent service:", agentError)
+          // Fall back to regular search if agent service fails
+        }
+      }
+
+      // Use regular search for simple queries or if agent service fails
       const searchResponse = await this.search(query)
 
       if (searchResponse.error || searchResponse.results.length === 0) {
@@ -155,6 +178,48 @@ export class SearchService {
       console.error("Error getting search answer:", error)
       return `I'm sorry, I encountered an error while searching for "${query}". ${error instanceof Error ? error.message : "Please try again later."}`
     }
+  }
+  
+  // Determine if a query is complex and requires agent capabilities
+  private async isComplexQuery(query: string): Promise<boolean> {
+    // Check for keywords that suggest the need for web automation or complex data gathering
+    const complexKeywords = [
+      'find', 'search for', 'look up', 'browse', 'navigate', 'go to', 'visit',
+      'extract', 'scrape', 'gather', 'collect', 'compile', 'analyze',
+      'compare', 'research', 'investigate', 'explore', 'discover',
+      'latest', 'recent', 'current', 'today', 'now',
+      'download', 'upload', 'transfer', 'send', 'receive',
+      'create account', 'sign up', 'register', 'login',
+      'book', 'reserve', 'schedule', 'appointment',
+      'buy', 'purchase', 'order', 'shop',
+      'check price', 'compare prices', 'find deals',
+      'track', 'monitor', 'follow', 'observe'
+    ]
+    
+    const lowercaseQuery = query.toLowerCase()
+    
+    // Check if any complex keywords are present in the query
+    for (const keyword of complexKeywords) {
+      if (lowercaseQuery.includes(keyword)) {
+        return true
+      }
+    }
+    
+    // Check if the query is asking for real-time or dynamic information
+    if (
+      lowercaseQuery.includes('weather') ||
+      lowercaseQuery.includes('stock') ||
+      lowercaseQuery.includes('price') ||
+      lowercaseQuery.includes('news') ||
+      lowercaseQuery.includes('trending') ||
+      lowercaseQuery.includes('forecast') ||
+      lowercaseQuery.includes('schedule') ||
+      lowercaseQuery.includes('availability')
+    ) {
+      return true
+    }
+    
+    return false
   }
 }
 

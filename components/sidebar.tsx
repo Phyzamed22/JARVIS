@@ -13,6 +13,7 @@ import {
   Headphones,
   Mic,
   HelpCircle,
+  Bot,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -23,6 +24,7 @@ const navItems = [
   { name: "Study", href: "/study", icon: BookOpen },
   { name: "Calendar", href: "/calendar", icon: Calendar },
   { name: "Tasks", href: "/tasks", icon: CheckSquare },
+  { name: "Agent", href: "/agent", icon: Bot },
   { name: "Analytics", href: "/analytics", icon: BarChart },
   { name: "Voice", href: "/voice", icon: Mic },
 ]

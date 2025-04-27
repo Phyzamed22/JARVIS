@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import { Calendar, Clock, CheckCircle2, Circle, AlertCircle, Plus, Trash } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Calendar, Clock, CheckCircle2, Circle, AlertCircle, Plus, Trash, Mic } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,6 +11,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogT
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
+import { VoiceWaveform } from '@/components/voice-waveform';
+import { getVoiceSettings } from '@/lib/voice-settings-service';
 
 interface Task {
   id?: string;
@@ -31,7 +33,61 @@ export function TasksModule() {
     priority: 'Medium',
   });
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
   const { toast } = useToast();
+  
+  // Initialize speech recognition
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        recognitionRef.current = new SpeechRecognition();
+        recognitionRef.current.continuous = false;
+        recognitionRef.current.interimResults = true;
+        recognitionRef.current.lang = 'en-US';
+        
+        recognitionRef.current.onresult = (event: any) => {
+          const transcript = event.results[0][0].transcript;
+          setTranscript(transcript);
+          setNewTask(prev => ({ ...prev, name: transcript }));
+        };
+        
+        recognitionRef.current.onend = () => {
+          setIsListening(false);
+        };
+      } else {
+        toast({
+          title: 'Speech Recognition Not Supported',
+          description: 'Your browser does not support speech recognition.',
+          variant: 'destructive',
+        });
+      }
+    }
+    
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+    };
+  }, []);
+  
+  // Toggle speech recognition
+  const toggleListening = () => {
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+      setIsListening(false);
+    } else {
+      setTranscript('');
+      if (recognitionRef.current) {
+        recognitionRef.current.start();
+        setIsListening(true);
+      }
+    }
+  };
 
   // Fetch tasks based on active tab
   useEffect(() => {
@@ -75,12 +131,21 @@ export function TasksModule() {
         return;
       }
 
+      // Map the task properties to match Notion's expected property names
+      const notionTask = {
+        name: newTask.name,
+        status: newTask.status,
+        dueDate: newTask.dueDate,
+        priority: newTask.priority,
+        notes: newTask.notes
+      };
+
       const response = await fetch('/api/tasks', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(newTask),
+        body: JSON.stringify(notionTask),
       });
 
       if (!response.ok) {
@@ -162,48 +227,70 @@ export function TasksModule() {
   };
 
   return (
-    <Card className="w-full">
-      <CardHeader className="flex flex-row items-center justify-between">
+    <Card className="w-full border-gray-800 bg-[#1e1e1e] shadow-lg">
+      <CardHeader className="flex flex-row items-center justify-between border-b border-gray-800 pb-4">
         <CardTitle>Tasks</CardTitle>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
-            <Button size="sm">
+            <Button size="sm" className="bg-blue-600 hover:bg-blue-700 transition-colors">
               <Plus className="h-4 w-4 mr-1" /> Add Task
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="bg-[#1e1e1e] border border-gray-800 shadow-xl">
             <DialogHeader>
-              <DialogTitle>Add New Task</DialogTitle>
+              <DialogTitle className="text-xl font-semibold">Add New Task</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label htmlFor="task-name">Task Name</Label>
-                <Input
-                  id="task-name"
-                  value={newTask.name}
-                  onChange={(e) => setNewTask({ ...newTask, name: e.target.value })}
-                  placeholder="Enter task name"
-                />
+                <div className="flex justify-between items-center">
+                  <Label htmlFor="task-name" className="text-sm font-medium">Task Name</Label>
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    size="icon" 
+                    className={`rounded-full ${isListening ? 'bg-red-500 text-white border-red-500' : 'border-gray-600'}`}
+                    onClick={toggleListening}
+                  >
+                    <Mic className="h-4 w-4" />
+                    {isListening && <span className="absolute top-0 right-0 flex h-3 w-3">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                    </span>}
+                  </Button>
+                </div>
+                <div className="relative">
+                  <Input
+                    id="task-name"
+                    value={newTask.name}
+                    onChange={(e) => setNewTask({ ...newTask, name: e.target.value })}
+                    placeholder="Enter task name or use voice input"
+                    className="pr-10 border-gray-700 bg-gray-800 focus:border-blue-500"
+                  />
+                  {isListening && <div className="absolute bottom-0 left-0 w-full">
+                    <VoiceWaveform className="h-1" />
+                  </div>}
+                </div>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="due-date">Due Date (Optional)</Label>
+                <Label htmlFor="due-date" className="text-sm font-medium">Due Date (Optional)</Label>
                 <Input
                   id="due-date"
                   type="date"
                   value={newTask.dueDate || ''}
                   onChange={(e) => setNewTask({ ...newTask, dueDate: e.target.value })}
+                  className="border-gray-700 bg-gray-800 focus:border-blue-500"
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="priority">Priority</Label>
+                <Label htmlFor="priority" className="text-sm font-medium">Priority</Label>
                 <Select
                   value={newTask.priority}
                   onValueChange={(value) => setNewTask({ ...newTask, priority: value as 'Low' | 'Medium' | 'High' })}
                 >
-                  <SelectTrigger id="priority">
+                  <SelectTrigger id="priority" className="border-gray-700 bg-gray-800 focus:border-blue-500">
                     <SelectValue placeholder="Select priority" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-gray-800 border-gray-700">
                     <SelectItem value="Low">Low</SelectItem>
                     <SelectItem value="Medium">Medium</SelectItem>
                     <SelectItem value="High">High</SelectItem>
@@ -211,18 +298,19 @@ export function TasksModule() {
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="notes">Notes (Optional)</Label>
+                <Label htmlFor="notes" className="text-sm font-medium">Notes (Optional)</Label>
                 <Input
                   id="notes"
                   value={newTask.notes || ''}
                   onChange={(e) => setNewTask({ ...newTask, notes: e.target.value })}
                   placeholder="Add notes"
+                  className="border-gray-700 bg-gray-800 focus:border-blue-500"
                 />
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleCreateTask}>Create Task</Button>
+              <Button variant="outline" className="border-gray-700 hover:bg-gray-800" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
+              <Button onClick={handleCreateTask} className="bg-blue-600 hover:bg-blue-700 transition-colors">Create Task</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
