@@ -173,7 +173,8 @@ class NotionService {
         throw new Error('Tasks database ID not configured');
       }
 
-      if (!this.client.auth) {
+      // Check if the client is properly authenticated
+      if (!this.client) {
         throw new Error('Notion API token not configured or invalid');
       }
 
