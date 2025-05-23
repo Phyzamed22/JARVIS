@@ -2,15 +2,16 @@ import { getAIService } from "./ai-service"
 import { groq } from "./groq"
 import { generateText } from "./ai"
 import { getSunaService } from "./suna-service"
+import { createAgentTask, getAgentTask, updateAgentTask, AgentTaskDB } from "./db";
 
 export interface AgentTask {
-  id: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
-  query: string
-  result?: string
-  error?: string
-  createdAt: Date
-  updatedAt: Date
+  id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  query: string;
+  result?: string | null; // Changed from result?: string
+  error?: string | null;  // Changed from error?: string
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface AgentResponse {
@@ -20,8 +21,8 @@ export interface AgentResponse {
   error?: string
 }
 
-// In-memory storage for agent tasks
-const agentTasks = new Map<string, AgentTask>()
+// In-memory storage for agent tasks - REMOVED
+// const agentTasks = new Map<string, AgentTask>()
 
 export class AgentService {
   private apiKey: string | undefined
@@ -47,17 +48,15 @@ export class AgentService {
       // Generate a unique task ID
       const taskId = `task-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
       
-      // Create a new task
-      const task: AgentTask = {
+      // Create a new task object for the DB
+      const dbTaskData = {
         id: taskId,
-        status: 'pending',
+        status: 'pending' as const, // Use 'as const' for type safety
         query,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      }
+        // result and error are initially null/undefined
+      };
       
-      // Store the task
-      agentTasks.set(taskId, task)
+      await createAgentTask(dbTaskData); // Store in DB
       
       // Start processing the task asynchronously
       this.processTask(taskId, query)
@@ -77,20 +76,28 @@ export class AgentService {
   }
 
   // Get the status of a task
-  public getTaskStatus(taskId: string): AgentTask | undefined {
-    return agentTasks.get(taskId)
+  public async getTaskStatus(taskId: string): Promise<AgentTask | undefined> {
+    const dbTask = await getAgentTask(taskId);
+    if (!dbTask) {
+      return undefined;
+    }
+    // Map AgentTaskDB to AgentTask
+    return {
+      id: dbTask.id,
+      status: dbTask.status,
+      query: dbTask.query,
+      result: dbTask.result,
+      error: dbTask.error,
+      createdAt: dbTask.created_at, // Map field name
+      updatedAt: dbTask.updated_at  // Map field name
+    };
   }
 
   // Process the task using Suna's agent capabilities
   private async processTask(taskId: string, query: string): Promise<void> {
     try {
       // Update task status to running
-      const task = agentTasks.get(taskId)
-      if (!task) return
-      
-      task.status = 'running'
-      task.updatedAt = new Date()
-      agentTasks.set(taskId, task)
+      await updateAgentTask(taskId, { status: 'running' });
       
       // Determine if this is a web automation task
       const isWebTask = await this.isWebAutomationTask(query)
@@ -108,21 +115,15 @@ export class AgentService {
       }
       
       // Update task with result
-      task.status = 'completed'
-      task.result = result
-      task.updatedAt = new Date()
-      agentTasks.set(taskId, task)
+      await updateAgentTask(taskId, { status: 'completed', result });
     } catch (error) {
       console.error(`Error processing task ${taskId}:`, error)
       
       // Update task with error
-      const task = agentTasks.get(taskId)
-      if (task) {
-        task.status = 'failed'
-        task.error = error instanceof Error ? error.message : String(error)
-        task.updatedAt = new Date()
-        agentTasks.set(taskId, task)
-      }
+      await updateAgentTask(taskId, { 
+        status: 'failed', 
+        error: error instanceof Error ? error.message : String(error) 
+      });
     }
   }
 

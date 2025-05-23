@@ -37,6 +37,16 @@ export interface UserProfile {
   preferences?: Record<string, any>
 }
 
+export interface AgentTaskDB {
+  id: string; // Task ID, PRIMARY KEY
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  query: string;
+  result?: string | null; // Result of the task, can be null
+  error?: string | null; // Error message if failed, can be null
+  created_at: Date; // Timestamp of creation
+  updated_at: Date; // Timestamp of last update
+}
+
 export interface UserInteraction {
   id?: number
   user_id: number
@@ -60,6 +70,75 @@ export async function executeSql(query: TemplateStringsArray, params: any[] = []
   }
 }
 
+export async function createAgentTask(taskData: Pick<AgentTaskDB, 'id' | 'query' | 'status' | 'result' | 'error'>): Promise<AgentTaskDB> {
+  try {
+    const result = await executeSql`
+      INSERT INTO agent_tasks (id, query, status, result, error, created_at, updated_at)
+      VALUES (${taskData.id}, ${taskData.query}, ${taskData.status}, ${taskData.result || null}, ${taskData.error || null}, NOW(), NOW())
+      RETURNING *
+    `;
+    return result.rows[0] as AgentTaskDB;
+  } catch (error) {
+    console.error("Failed to create agent task:", error);
+    throw error;
+  }
+}
+
+export async function getAgentTask(taskId: string): Promise<AgentTaskDB | null> {
+  try {
+    const result = await executeSql`
+      SELECT * FROM agent_tasks
+      WHERE id = ${taskId}
+    `;
+    return (result.rows[0] as AgentTaskDB) || null;
+  } catch (error) {
+    console.error("Failed to fetch agent task:", error);
+    throw error; 
+  }
+}
+
+export async function updateAgentTask(taskId: string, updates: Partial<Omit<AgentTaskDB, 'id' | 'created_at'>>): Promise<AgentTaskDB | null> {
+  try {
+    const currentTask = await getAgentTask(taskId);
+    if (!currentTask) return null;
+
+    // Merge updates with current task data
+    const taskToUpdate: AgentTaskDB = { 
+      ...currentTask, 
+      ...updates, 
+      updated_at: new Date() 
+    };
+    
+    const updateResult = await executeSql`
+        UPDATE agent_tasks
+        SET status = ${taskToUpdate.status}, 
+            query = ${taskToUpdate.query}, 
+            result = ${taskToUpdate.result || null}, 
+            error = ${taskToUpdate.error || null}, 
+            updated_at = ${taskToUpdate.updated_at}
+        WHERE id = ${taskId}
+        RETURNING *
+    `;
+    return (updateResult.rows[0] as AgentTaskDB) || null;
+
+  } catch (error) {
+    console.error("Failed to update agent task:", error);
+    throw error; 
+  }
+}
+
+export async function getAllAgentTasks(): Promise<AgentTaskDB[]> {
+  try {
+    const result = await executeSql`
+      SELECT * FROM agent_tasks
+      ORDER BY created_at DESC
+    `;
+    return result.rows as AgentTaskDB[];
+  } catch (error) {
+    console.error("Failed to fetch all agent tasks:", error);
+    return []; 
+  }
+}
 export function getDatabaseStatus(): { status: DatabaseStatus; error?: Error } {
   try {
     if (!process.env.DATABASE_URL) {
@@ -148,6 +227,18 @@ export async function initializeDatabase(): Promise<{ success: boolean; error?: 
         audio_url TEXT
       );
     `
+
+    await executeSql`
+      CREATE TABLE IF NOT EXISTS agent_tasks (
+        id TEXT PRIMARY KEY,
+        status VARCHAR(50) NOT NULL,
+        query TEXT NOT NULL,
+        result TEXT,
+        error TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `;
 
     return { success: true }
   } catch (error: any) {
